@@ -1,5 +1,7 @@
 # AI-Powered Supply Chain Digital Twin
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A deterministic supply-chain simulation and operations analytics platform for three warehouses, 30 SKUs, and five suppliers.
 
 ## Architecture
