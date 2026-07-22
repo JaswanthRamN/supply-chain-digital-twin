@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-supply_chain}
+      POSTGRES_USER: ${POSTGRES_USER:-supply_chain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-supply_chain} -d ${POSTGRES_DB:-supply_chain}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://supply_chain:change_me@db:5432/supply_chain}
+      SIMULATION_SEED: ${SIMULATION_SEED:-42}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "python -m scripts.init_db && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  dashboard:
+    build: .
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-http://api:8000}
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    command: streamlit run dashboard/control_tower.py --server.address=0.0.0.0 --server.port=8501
+
+volumes:
+  postgres_data:

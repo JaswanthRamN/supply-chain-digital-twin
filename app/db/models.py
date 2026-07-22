@@ -1,0 +1,84 @@
+from datetime import date, datetime
+from decimal import Decimal
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+from app.db.base import Base
+
+class Warehouse(Base):
+    __tablename__ = "warehouses"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    region: Mapped[str] = mapped_column(String(50))
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    base_lead_time_days: Mapped[int] = mapped_column(Integer)
+    reliability: Mapped[float] = mapped_column(Float)
+
+class SKU(Base):
+    __tablename__ = "skus"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    description: Mapped[str] = mapped_column(String(120))
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"))
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    holding_cost_daily: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    shortage_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    reorder_point: Mapped[int] = mapped_column(Integer)
+    reorder_qty: Mapped[int] = mapped_column(Integer)
+
+class InventorySnapshot(Base):
+    __tablename__ = "inventory_snapshots"
+    __table_args__ = (UniqueConstraint("snapshot_date", "warehouse_id", "sku_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    sku_id: Mapped[int] = mapped_column(ForeignKey("skus.id"), index=True)
+    on_hand: Mapped[int] = mapped_column(Integer)
+    on_order: Mapped[int] = mapped_column(Integer, default=0)
+    backorder: Mapped[int] = mapped_column(Integer, default=0)
+
+class SupplyChainEvent(Base):
+    __tablename__ = "supply_chain_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_time: Mapped[datetime] = mapped_column(DateTime, index=True)
+    event_type: Mapped[str] = mapped_column(String(40), index=True)
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"), nullable=True)
+    sku_id: Mapped[int | None] = mapped_column(ForeignKey("skus.id"), nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+    cost: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    details: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+class DailyWarehouseKPI(Base):
+    __tablename__ = "daily_warehouse_kpis"
+    __table_args__ = (UniqueConstraint("kpi_date", "warehouse_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kpi_date: Mapped[date] = mapped_column(Date, index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    demand_units: Mapped[int] = mapped_column(Integer)
+    fulfilled_units: Mapped[int] = mapped_column(Integer)
+    stockout_units: Mapped[int] = mapped_column(Integer)
+    fill_rate: Mapped[float] = mapped_column(Float)
+    inventory_units: Mapped[int] = mapped_column(Integer)
+    inventory_value: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    holding_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    ordering_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    transfer_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    shortage_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+
+class DailyNetworkKPI(Base):
+    __tablename__ = "daily_network_kpis"
+    kpi_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    demand_units: Mapped[int] = mapped_column(Integer)
+    fulfilled_units: Mapped[int] = mapped_column(Integer)
+    stockout_units: Mapped[int] = mapped_column(Integer)
+    fill_rate: Mapped[float] = mapped_column(Float)
+    inventory_units: Mapped[int] = mapped_column(Integer)
+    inventory_value: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
