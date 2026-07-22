@@ -47,3 +47,9 @@ streamlit run dashboard/control_tower.py
 ```bash
 pytest -q
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+Copyright (c) 2026 Jaswanth Ram Nagabhyrava.
