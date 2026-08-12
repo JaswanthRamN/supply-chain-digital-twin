@@ -39,11 +39,15 @@ def test_simulation_endpoint_accepts_seed_and_start_date(db):
         client = TestClient(app)
         response = client.post("/simulation/run?days=2&seed=99&start_date=2026-02-01")
         assert response.status_code == 200
-        assert response.json() == {
-            "days": 2,
-            "seed": 99,
-            "start_date": "2026-02-01",
-            "end_date": "2026-02-02",
-        }
+        payload = response.json()
+        assert payload["run_id"]
+        assert payload["run_type"] == "baseline"
+        assert payload["scenario_id"] is None
+        assert payload["baseline_run_id"] is None
+        assert payload["days"] == 2
+        assert payload["seed"] == 99
+        assert payload["start_date"] == "2026-02-01"
+        assert payload["end_date"] == "2026-02-02"
+        assert payload["status"] == "COMPLETED"
     finally:
         app.dependency_overrides.clear()
