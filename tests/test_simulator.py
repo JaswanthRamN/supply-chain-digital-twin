@@ -26,16 +26,25 @@ def test_simulation_builds_expected_dimensions_and_facts(db):
 
 def test_simulation_is_deterministic(db):
     simulator = DigitalTwinSimulator(db, seed=7)
-    simulator.run(days=10)
+    first_run = simulator.run(days=10)
     first = [
         (x.kpi_date, x.demand_units, x.fulfilled_units, round(x.fill_rate, 6), float(x.total_cost))
-        for x in db.scalars(select(DailyNetworkKPI).order_by(DailyNetworkKPI.kpi_date))
+        for x in db.scalars(
+            select(DailyNetworkKPI)
+            .where(DailyNetworkKPI.run_id == first_run["run_id"])
+            .order_by(DailyNetworkKPI.kpi_date)
+        )
     ]
-    simulator.run(days=10)
+    second_run = simulator.run(days=10)
     second = [
         (x.kpi_date, x.demand_units, x.fulfilled_units, round(x.fill_rate, 6), float(x.total_cost))
-        for x in db.scalars(select(DailyNetworkKPI).order_by(DailyNetworkKPI.kpi_date))
+        for x in db.scalars(
+            select(DailyNetworkKPI)
+            .where(DailyNetworkKPI.run_id == second_run["run_id"])
+            .order_by(DailyNetworkKPI.kpi_date)
+        )
     ]
+    assert first_run["run_id"] != second_run["run_id"]
     assert first == second
 
 

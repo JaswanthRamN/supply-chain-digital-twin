@@ -28,6 +28,12 @@ Create data:
 curl -X POST 'http://localhost:8000/simulation/run?days=30'
 ```
 
+## Scenario analysis
+
+The API supports persistent baseline and scenario runs for demand spikes, supplier shutdowns, capacity reductions, lead-time increases, transportation delays, warehouse shutdowns, and inventory loss. Runs use server-generated UUIDs, preserve historical results, and expose absolute and percentage comparison metrics.
+
+See [Milestone 8 scenario documentation](docs/MILESTONE_8_SCENARIOS.md) for disruption parameters, targeting rules, endpoints, examples, and metric definitions.
+
 ## Run locally with SQLite
 
 ```bash
