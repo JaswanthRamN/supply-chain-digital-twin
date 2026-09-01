@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailyNetworkKPI, DailyWarehouseKPI, InventorySnapshot, SKU, SupplyChainEvent, Warehouse
+from app.db.models import SKU, DailyNetworkKPI, DailyWarehouseKPI, InventorySnapshot, SupplyChainEvent, Warehouse
 from app.simulator.events import (
     DEMAND_CREATED,
     DEMAND_FULFILLED,
@@ -36,32 +36,32 @@ def refresh_analytics(db: Session) -> None:
             "fulfilled": 0,
             "stockout": 0,
             "inventory": 0,
-            "value": Decimal("0"),
-            "holding": Decimal("0"),
-            "ordering": Decimal("0"),
-            "transfer": Decimal("0"),
-            "shortage": Decimal("0"),
+            "value": Decimal(0),
+            "holding": Decimal(0),
+            "ordering": Decimal(0),
+            "transfer": Decimal(0),
+            "shortage": Decimal(0),
         }
 
         for warehouse in warehouses:
-            def event_quantity(event_type: str) -> int:
+            def event_quantity(event_type: str, wh_id: int = warehouse.id, d: str = day.isoformat()) -> int:
                 return int(
                     db.scalar(
                         select(func.coalesce(func.sum(SupplyChainEvent.quantity), 0)).where(
-                            func.date(SupplyChainEvent.event_time) == day.isoformat(),
-                            SupplyChainEvent.warehouse_id == warehouse.id,
+                            func.date(SupplyChainEvent.event_time) == d,
+                            SupplyChainEvent.warehouse_id == wh_id,
                             SupplyChainEvent.event_type == event_type,
                         )
                     )
                     or 0
                 )
 
-            def event_cost(event_type: str) -> Decimal:
+            def event_cost(event_type: str, wh_id: int = warehouse.id, d: str = day.isoformat()) -> Decimal:
                 return _decimal(
                     db.scalar(
                         select(func.coalesce(func.sum(SupplyChainEvent.cost), 0)).where(
-                            func.date(SupplyChainEvent.event_time) == day.isoformat(),
-                            SupplyChainEvent.warehouse_id == warehouse.id,
+                            func.date(SupplyChainEvent.event_time) == d,
+                            SupplyChainEvent.warehouse_id == wh_id,
                             SupplyChainEvent.event_type == event_type,
                         )
                     )

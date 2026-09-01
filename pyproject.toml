@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: isort, B: flake8-bugbear, FURB: refurb, SIM: flake8-simplify
+select = ["E", "W", "F", "I", "B", "FURB", "SIM"]
+ignore = [
+    # FastAPI uses function calls (e.g. Query(), Depends()) as default argument values — this is intentional.
+    "B008",
+]

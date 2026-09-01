@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
-from app.db.models import DailyNetworkKPI, InventorySnapshot, SKU, SupplyChainEvent, Warehouse
+from app.db.models import SKU, DailyNetworkKPI, InventorySnapshot, SupplyChainEvent, Warehouse
 from app.simulator.engine import DigitalTwinSimulator
 from app.simulator.events import (
     BACKORDER_CREATED,

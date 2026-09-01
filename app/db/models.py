@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -125,3 +125,22 @@ class DailyNetworkKPI(Base):
     transfer_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     shortage_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     total_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+
+
+class ScenarioRun(Base):
+    __tablename__ = "scenario_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    days: Mapped[int] = mapped_column(Integer)
+    seed: Mapped[int] = mapped_column(Integer)
+    start_date: Mapped[date] = mapped_column(Date)
+    end_date: Mapped[date] = mapped_column(Date)
+    disruption_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # KPI deltas vs baseline (populated by scenario comparison)
+    delta_fill_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delta_total_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    delta_stockout_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Serialised daily network KPIs snapshot for this scenario
+    kpi_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
