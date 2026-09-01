@@ -372,3 +372,38 @@ def test_supplier_shutdown_scenario(db):
         assert data["delta_stockout_units"] is not None
     finally:
         app.dependency_overrides.clear()
+
+
+def test_low_stock_filter_by_warehouse(db):
+    client = _seeded_client(db, days=10)
+    try:
+        all_alerts = client.get("/inventory/low-stock").json()
+        wh1_alerts = client.get("/inventory/low-stock?warehouse_id=1").json()
+        assert all(row["warehouse_id"] == 1 for row in wh1_alerts)
+        assert len(wh1_alerts) <= len(all_alerts)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_scenario_kpi_snapshot_is_valid_json(db):
+    client = _client(db)
+    try:
+        body = {
+            "name": "json-check",
+            "days": 3,
+            "seed": 42,
+            "start_date": "2026-01-01",
+            "compare_to_baseline": False,
+            "demand_spikes": [],
+            "supplier_shutdowns": [],
+            "transfer_delays": [],
+        }
+        run = client.post("/simulation/scenario", json=body).json()
+        import json
+        snapshot = json.loads(run["kpi_snapshot"])
+        assert isinstance(snapshot, list)
+        assert len(snapshot) == 3
+        assert "kpi_date" in snapshot[0]
+        assert "fill_rate" in snapshot[0]
+    finally:
+        app.dependency_overrides.clear()

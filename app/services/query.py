@@ -8,10 +8,10 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    SKU,
     DailyNetworkKPI,
     DailyWarehouseKPI,
     InventorySnapshot,
-    SKU,
     Supplier,
     SupplyChainEvent,
     Warehouse,
@@ -21,7 +21,6 @@ from app.simulator.events import (
     PURCHASE_ORDER_CREATED,
     STOCKOUT,
     SUPPLIER_DELAY,
-    EventType,
 )
 
 
@@ -167,7 +166,7 @@ def get_sku_kpis(db: Session) -> list[dict]:
         row = agg_by_sku.get(sku.id)
         total_demand = int(row.total_demand) if row else 0
         total_stockout = int(row.total_stockout) if row else 0
-        total_shortage_cost = Decimal(str(row.total_shortage_cost)) if row else Decimal("0")
+        total_shortage_cost = Decimal(str(row.total_shortage_cost)) if row else Decimal(0)
         fulfilled = total_demand - total_stockout
         fill_rate = fulfilled / total_demand if total_demand else 1.0
         results.append(

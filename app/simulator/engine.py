@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import json
+import random
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-import json
-import random
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.analytics.refresh import refresh_analytics
-from app.db.models import InventorySnapshot, SKU, Supplier, SupplyChainEvent, Warehouse
+from app.db.models import SKU, InventorySnapshot, Supplier, SupplyChainEvent, Warehouse
 from app.simulator.disruptions import DisruptionConfig
 from app.simulator.events import (
     BACKORDER_CREATED,
@@ -105,7 +105,7 @@ class DigitalTwinSimulator:
         sku_id: int | None = None,
         supplier_id: int | None = None,
         quantity: int = 0,
-        cost: Decimal = Decimal("0"),
+        cost: Decimal = Decimal(0),
         reference: str | None = None,
         details: dict | None = None,
     ) -> None:

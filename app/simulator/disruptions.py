@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Literal
 
 
 @dataclass
@@ -42,11 +41,12 @@ class DisruptionConfig:
         """Return the combined demand multiplier for a given date/sku/warehouse."""
         multiplier = 1.0
         for spike in self.demand_spikes:
-            if spike.start_date <= sim_date <= spike.end_date:
-                if (not spike.sku_ids or sku_id in spike.sku_ids) and (
-                    not spike.warehouse_ids or warehouse_id in spike.warehouse_ids
-                ):
-                    multiplier *= spike.multiplier
+            if (
+                spike.start_date <= sim_date <= spike.end_date
+                and (not spike.sku_ids or sku_id in spike.sku_ids)
+                and (not spike.warehouse_ids or warehouse_id in spike.warehouse_ids)
+            ):
+                multiplier *= spike.multiplier
         return multiplier
 
     def is_supplier_shutdown(self, sim_date: date, supplier_id: int) -> bool:

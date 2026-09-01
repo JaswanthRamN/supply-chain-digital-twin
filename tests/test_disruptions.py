@@ -1,9 +1,8 @@
 from datetime import date
 
-import pytest
 from sqlalchemy import func, select
 
-from app.db.models import DailyNetworkKPI, SupplyChainEvent
+from app.db.models import SupplyChainEvent
 from app.simulator.disruptions import DemandSpike, DisruptionConfig, SupplierShutdown, TransferDelay
 from app.simulator.engine import DigitalTwinSimulator
 from app.simulator.events import DEMAND_CREATED, STOCKOUT, SUPPLIER_DELAY
@@ -132,3 +131,30 @@ def test_disruption_config_transfer_extra_days():
     )
     assert cfg.transfer_extra_days(date(2026, 1, 7)) == 3
     assert cfg.transfer_extra_days(date(2026, 1, 4)) == 0
+
+
+def test_combined_disruption_spike_and_shutdown(db):
+    """Combined demand spike + supplier shutdown should produce more stockouts than baseline."""
+    from datetime import date as dt
+    DigitalTwinSimulator(db, seed=42).run(days=10, reset=True)
+    baseline_stockout = int(
+        db.scalar(
+            select(func.sum(SupplyChainEvent.quantity)).where(SupplyChainEvent.event_type == STOCKOUT)
+        )
+        or 0
+    )
+
+    disruptions = DisruptionConfig(
+        demand_spikes=[DemandSpike(multiplier=3.0, start_date=dt(2026, 1, 1), end_date=dt(2026, 1, 10))],
+        supplier_shutdowns=[SupplierShutdown(supplier_id=1, start_date=dt(2026, 1, 1), end_date=dt(2026, 1, 10))],
+    )
+    DigitalTwinSimulator(db, seed=42, disruptions=disruptions).run(days=10, reset=True)
+    combined_stockout = int(
+        db.scalar(
+            select(func.sum(SupplyChainEvent.quantity)).where(SupplyChainEvent.event_type == STOCKOUT)
+        )
+        or 0
+    )
+    assert combined_stockout >= baseline_stockout, (
+        "Combined disruption should not produce fewer stockouts than baseline"
+    )

@@ -4,15 +4,12 @@ import json
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.analytics.refresh import refresh_analytics
 from app.db.models import (
     DailyNetworkKPI,
-    InventorySnapshot,
     ScenarioRun,
-    SupplyChainEvent,
 )
 from app.simulator.disruptions import DisruptionConfig
 from app.simulator.engine import DigitalTwinSimulator

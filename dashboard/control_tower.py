@@ -187,8 +187,12 @@ try:
     sup_kpis = pd.DataFrame(get("/kpis/supplier"))
     if not sup_kpis.empty:
         sup_kpis["delay_rate_pct"] = sup_kpis["delay_rate"] * 100
+        sup_cols = [
+            "supplier_code", "name", "total_purchase_orders",
+            "total_delays", "delay_rate_pct", "avg_delay_days",
+        ]
         st.dataframe(
-            sup_kpis[["supplier_code", "name", "total_purchase_orders", "total_delays", "delay_rate_pct", "avg_delay_days"]],
+            sup_kpis[sup_cols],
             use_container_width=True,
         )
 
@@ -207,8 +211,9 @@ try:
     if scenarios.empty:
         st.info("No scenario runs yet. Use the sidebar to run a disruption scenario.")
     else:
+        scn_cols = ["id", "name", "created_at", "days", "delta_fill_rate", "delta_total_cost", "delta_stockout_units"]
         st.dataframe(
-            scenarios[["id", "name", "created_at", "days", "delta_fill_rate", "delta_total_cost", "delta_stockout_units"]],
+            scenarios[scn_cols],
             use_container_width=True,
         )
 
