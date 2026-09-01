@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.analytics.refresh import refresh_analytics
 from app.db.models import InventorySnapshot, SKU, Supplier, SupplyChainEvent, Warehouse
+from app.simulator.disruptions import DisruptionConfig
 from app.simulator.events import (
     BACKORDER_CREATED,
     BACKORDER_FULFILLED,
@@ -38,14 +39,14 @@ class ScheduledReceipt:
 class DigitalTwinSimulator:
     """Deterministic synthetic supply-chain simulation.
 
-    The baseline simulator intentionally keeps transportation transfers same-day. Transfer
-    lead times and disruption controls belong to Milestone 8.
+    Supports Milestone 8 disruption scenarios via an optional DisruptionConfig.
     """
 
-    def __init__(self, db: Session, seed: int = 42):
+    def __init__(self, db: Session, seed: int = 42, disruptions: DisruptionConfig | None = None):
         self.db = db
         self.seed = seed
         self.rng = random.Random(seed)
+        self.disruptions = disruptions or DisruptionConfig()
 
     def seed_master_data(self) -> None:
         if self.db.scalar(select(Warehouse.id).limit(1)):
@@ -174,10 +175,18 @@ class DigitalTwinSimulator:
                         reference=receipt.purchase_order_reference,
                     )
 
+            # Transfer delay extra days active today
+            transfer_extra = self.disruptions.transfer_extra_days(day)
+
             for warehouse in warehouses:
                 for sku in skus:
                     key = (warehouse.id, sku.id)
-                    demand = max(0, int(self.rng.gauss(7 + sku.id % 5, 3)))
+
+                    # Apply demand spike multiplier
+                    base_demand = max(0, int(self.rng.gauss(7 + sku.id % 5, 3)))
+                    multiplier = self.disruptions.demand_multiplier(day, sku.id, warehouse.id)
+                    demand = max(0, int(base_demand * multiplier))
+
                     available = inventory[key]
                     fulfilled = min(available, demand)
                     shortage = demand - fulfilled
@@ -207,9 +216,24 @@ class DigitalTwinSimulator:
                         transferable = max(0, inventory[donor_key] - sku.reorder_point)
                         transfer_qty = min(shortage, transferable)
                         if transfer_qty:
-                            inventory[donor_key] -= transfer_qty
-                            fulfilled += transfer_qty
-                            shortage -= transfer_qty
+                            if transfer_extra > 0:
+                                # Delayed transfer: schedule arrival instead of same-day
+                                arrival_date = day + timedelta(days=transfer_extra)
+                                arrivals[arrival_date].append(
+                                    ScheduledReceipt(
+                                        warehouse_id=warehouse.id,
+                                        sku_id=sku.id,
+                                        supplier_id=suppliers[sku.supplier_id].id,
+                                        quantity=transfer_qty,
+                                        purchase_order_reference=f"TRANSFER-DELAYED-{day.isoformat()}",
+                                    )
+                                )
+                                inventory[donor_key] -= transfer_qty
+                                on_order[key] += transfer_qty
+                            else:
+                                inventory[donor_key] -= transfer_qty
+                                fulfilled += transfer_qty
+                                shortage -= transfer_qty
                             self._add_event(
                                 event_time=ts,
                                 event_type=INVENTORY_TRANSFER,
@@ -221,16 +245,18 @@ class DigitalTwinSimulator:
                                 details={
                                     "source_warehouse_id": donor.id,
                                     "destination_warehouse_id": warehouse.id,
+                                    "delayed_days": transfer_extra,
                                 },
                             )
-                            self._add_event(
-                                event_time=ts,
-                                event_type=DEMAND_FULFILLED,
-                                warehouse_id=warehouse.id,
-                                sku_id=sku.id,
-                                quantity=transfer_qty,
-                                reference="EMERGENCY_TRANSFER",
-                            )
+                            if transfer_extra == 0:
+                                self._add_event(
+                                    event_time=ts,
+                                    event_type=DEMAND_FULFILLED,
+                                    warehouse_id=warehouse.id,
+                                    sku_id=sku.id,
+                                    quantity=transfer_qty,
+                                    reference="EMERGENCY_TRANSFER",
+                                )
 
                     if shortage:
                         backorders[key] += shortage
@@ -254,35 +280,8 @@ class DigitalTwinSimulator:
                     inventory_position = inventory[key] + on_order[key] - backorders[key]
                     if inventory_position <= sku.reorder_point:
                         supplier = suppliers[sku.supplier_id]
-                        po_sequence += 1
-                        po_reference = f"PO-{day:%Y%m%d}-{po_sequence:05d}"
-                        delay_days = 0 if self.rng.random() <= supplier.reliability else self.rng.randint(1, 4)
-                        arrival_date = day + timedelta(days=supplier.base_lead_time_days + delay_days)
-                        arrivals[arrival_date].append(
-                            ScheduledReceipt(
-                                warehouse_id=warehouse.id,
-                                sku_id=sku.id,
-                                supplier_id=supplier.id,
-                                quantity=sku.reorder_qty,
-                                purchase_order_reference=po_reference,
-                            )
-                        )
-                        on_order[key] += sku.reorder_qty
-                        self._add_event(
-                            event_time=ts,
-                            event_type=PURCHASE_ORDER_CREATED,
-                            warehouse_id=warehouse.id,
-                            sku_id=sku.id,
-                            supplier_id=supplier.id,
-                            quantity=sku.reorder_qty,
-                            cost=Decimal("35.00"),
-                            reference=po_reference,
-                            details={
-                                "expected_arrival_date": arrival_date.isoformat(),
-                                "delay_days": delay_days,
-                            },
-                        )
-                        if delay_days:
+                        # Skip PO if supplier is shut down
+                        if self.disruptions.is_supplier_shutdown(day, supplier.id):
                             self._add_event(
                                 event_time=ts,
                                 event_type=SUPPLIER_DELAY,
@@ -290,12 +289,55 @@ class DigitalTwinSimulator:
                                 sku_id=sku.id,
                                 supplier_id=supplier.id,
                                 quantity=sku.reorder_qty,
-                                reference=po_reference,
                                 details={
-                                    "delay_days": delay_days,
-                                    "revised_arrival_date": arrival_date.isoformat(),
+                                    "delay_days": 0,
+                                    "indefinite": True,
+                                    "reason": "supplier_shutdown",
                                 },
                             )
+                        else:
+                            po_sequence += 1
+                            po_reference = f"PO-{day:%Y%m%d}-{po_sequence:05d}"
+                            delay_days = 0 if self.rng.random() <= supplier.reliability else self.rng.randint(1, 4)
+                            arrival_date = day + timedelta(days=supplier.base_lead_time_days + delay_days)
+                            arrivals[arrival_date].append(
+                                ScheduledReceipt(
+                                    warehouse_id=warehouse.id,
+                                    sku_id=sku.id,
+                                    supplier_id=supplier.id,
+                                    quantity=sku.reorder_qty,
+                                    purchase_order_reference=po_reference,
+                                )
+                            )
+                            on_order[key] += sku.reorder_qty
+                            self._add_event(
+                                event_time=ts,
+                                event_type=PURCHASE_ORDER_CREATED,
+                                warehouse_id=warehouse.id,
+                                sku_id=sku.id,
+                                supplier_id=supplier.id,
+                                quantity=sku.reorder_qty,
+                                cost=Decimal("35.00"),
+                                reference=po_reference,
+                                details={
+                                    "expected_arrival_date": arrival_date.isoformat(),
+                                    "delay_days": delay_days,
+                                },
+                            )
+                            if delay_days:
+                                self._add_event(
+                                    event_time=ts,
+                                    event_type=SUPPLIER_DELAY,
+                                    warehouse_id=warehouse.id,
+                                    sku_id=sku.id,
+                                    supplier_id=supplier.id,
+                                    quantity=sku.reorder_qty,
+                                    reference=po_reference,
+                                    details={
+                                        "delay_days": delay_days,
+                                        "revised_arrival_date": arrival_date.isoformat(),
+                                    },
+                                )
 
                     holding_cost = sku.holding_cost_daily * inventory[key]
                     self._add_event(

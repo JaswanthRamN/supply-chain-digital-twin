@@ -248,3 +248,127 @@ def test_simulation_reset_false_appends_data(db):
     finally:
         app.dependency_overrides.clear()
 
+
+
+def test_low_stock_endpoint_returns_results(db):
+    client = _seeded_client(db, days=5)
+    try:
+        response = client.get("/inventory/low-stock")
+        assert response.status_code == 200
+        data = response.json()
+        for row in data:
+            assert row["on_hand"] <= row["reorder_point"]
+            assert "sku_code" in row
+            assert "shortfall" in row
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_inventory_pagination_offset(db):
+    client = _seeded_client(db, days=5)
+    try:
+        page1 = client.get("/inventory?limit=10&offset=0").json()
+        page2 = client.get("/inventory?limit=10&offset=10").json()
+        assert len(page1) == 10
+        assert len(page2) == 10
+        ids1 = {r["id"] for r in page1}
+        ids2 = {r["id"] for r in page2}
+        assert ids1.isdisjoint(ids2), "Pages should not overlap"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_events_pagination_offset(db):
+    client = _seeded_client(db, days=5)
+    try:
+        page1 = client.get("/events?limit=10&offset=0").json()
+        page2 = client.get("/events?limit=10&offset=10").json()
+        ids1 = {r["id"] for r in page1}
+        ids2 = {r["id"] for r in page2}
+        assert ids1.isdisjoint(ids2), "Event pages should not overlap"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_scenario_run_endpoint(db):
+    client = _client(db)
+    try:
+        body = {
+            "name": "test-demand-spike",
+            "days": 5,
+            "seed": 42,
+            "start_date": "2026-01-01",
+            "compare_to_baseline": True,
+            "demand_spikes": [
+                {
+                    "multiplier": 2.0,
+                    "start_date": "2026-01-02",
+                    "end_date": "2026-01-04",
+                }
+            ],
+            "supplier_shutdowns": [],
+            "transfer_delays": [],
+        }
+        response = client.post("/simulation/scenario", json=body)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "test-demand-spike"
+        assert data["days"] == 5
+        assert data["delta_fill_rate"] is not None
+        assert data["delta_total_cost"] is not None
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_scenario_list_and_get(db):
+    client = _client(db)
+    try:
+        body = {
+            "name": "list-test",
+            "days": 3,
+            "seed": 7,
+            "start_date": "2026-01-01",
+            "compare_to_baseline": False,
+            "demand_spikes": [],
+            "supplier_shutdowns": [],
+            "transfer_delays": [],
+        }
+        created = client.post("/simulation/scenario", json=body).json()
+        run_id = created["id"]
+
+        list_resp = client.get("/simulation/scenarios")
+        assert list_resp.status_code == 200
+        ids = [s["id"] for s in list_resp.json()]
+        assert run_id in ids
+
+        get_resp = client.get(f"/simulation/scenarios/{run_id}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["name"] == "list-test"
+
+        missing = client.get("/simulation/scenarios/99999")
+        assert missing.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_supplier_shutdown_scenario(db):
+    client = _client(db)
+    try:
+        body = {
+            "name": "supplier-shutdown",
+            "days": 5,
+            "seed": 42,
+            "start_date": "2026-01-01",
+            "compare_to_baseline": True,
+            "supplier_shutdowns": [
+                {"supplier_id": 1, "start_date": "2026-01-01", "end_date": "2026-01-05"}
+            ],
+            "demand_spikes": [],
+            "transfer_delays": [],
+        }
+        response = client.post("/simulation/scenario", json=body)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["delta_stockout_units"] is not None
+    finally:
+        app.dependency_overrides.clear()

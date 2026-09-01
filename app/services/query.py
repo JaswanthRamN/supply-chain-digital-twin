@@ -34,11 +34,13 @@ def get_inventory(
     date_from: date | None = None,
     date_to: date | None = None,
     limit: int = 500,
+    offset: int = 0,
 ) -> list[InventorySnapshot]:
     stmt = (
         select(InventorySnapshot)
         .order_by(InventorySnapshot.snapshot_date.desc())
         .limit(limit)
+        .offset(offset)
     )
     if snapshot_date:
         stmt = stmt.where(InventorySnapshot.snapshot_date == snapshot_date)
@@ -63,11 +65,13 @@ def get_events(
     date_from: date | None = None,
     date_to: date | None = None,
     limit: int = 200,
+    offset: int = 0,
 ) -> list[SupplyChainEvent]:
     stmt = (
         select(SupplyChainEvent)
         .order_by(SupplyChainEvent.event_time.desc(), SupplyChainEvent.id.desc())
         .limit(limit)
+        .offset(offset)
     )
     if event_type:
         stmt = stmt.where(SupplyChainEvent.event_type == event_type)
@@ -244,3 +248,31 @@ def get_kpi_summary(db: Session) -> DailyNetworkKPI | None:
     return db.scalar(
         select(DailyNetworkKPI).order_by(DailyNetworkKPI.kpi_date.desc()).limit(1)
     )
+
+
+def get_low_stock_alerts(db: Session, *, warehouse_id: int | None = None) -> list[dict]:
+    """Return inventory rows where on_hand <= reorder_point on the latest snapshot date."""
+    latest_date_subq = select(func.max(InventorySnapshot.snapshot_date)).scalar_subquery()
+    stmt = (
+        select(InventorySnapshot, SKU)
+        .join(SKU, SKU.id == InventorySnapshot.sku_id)
+        .where(
+            InventorySnapshot.snapshot_date == latest_date_subq,
+            InventorySnapshot.on_hand <= SKU.reorder_point,
+        )
+        .order_by(InventorySnapshot.warehouse_id, SKU.code)
+    )
+    if warehouse_id:
+        stmt = stmt.where(InventorySnapshot.warehouse_id == warehouse_id)
+    rows = db.execute(stmt).all()
+    return [
+        {
+            "warehouse_id": snap.warehouse_id,
+            "sku_id": snap.sku_id,
+            "sku_code": sku.code,
+            "on_hand": snap.on_hand,
+            "reorder_point": sku.reorder_point,
+            "shortfall": sku.reorder_point - snap.on_hand,
+        }
+        for snap, sku in rows
+    ]
