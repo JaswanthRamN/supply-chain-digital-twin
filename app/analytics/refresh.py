@@ -19,14 +19,16 @@ def _decimal(value) -> Decimal:
     return Decimal(str(value or 0))
 
 
-def refresh_analytics(db: Session) -> None:
+def refresh_analytics(db: Session, run_id: str) -> None:
+    """Materialize KPIs for one simulation run without touching prior run history."""
     dates = db.scalars(
         select(func.date(SupplyChainEvent.event_time))
+        .where(SupplyChainEvent.run_id == run_id)
         .distinct()
         .order_by(func.date(SupplyChainEvent.event_time))
     ).all()
-    db.execute(delete(DailyWarehouseKPI))
-    db.execute(delete(DailyNetworkKPI))
+    db.execute(delete(DailyWarehouseKPI).where(DailyWarehouseKPI.run_id == run_id))
+    db.execute(delete(DailyNetworkKPI).where(DailyNetworkKPI.run_id == run_id))
     warehouses = list(db.scalars(select(Warehouse).order_by(Warehouse.id)).all())
 
     for raw_day in dates:
@@ -48,6 +50,7 @@ def refresh_analytics(db: Session) -> None:
                 return int(
                     db.scalar(
                         select(func.coalesce(func.sum(SupplyChainEvent.quantity), 0)).where(
+                            SupplyChainEvent.run_id == run_id,
                             func.date(SupplyChainEvent.event_time) == d,
                             SupplyChainEvent.warehouse_id == wh_id,
                             SupplyChainEvent.event_type == event_type,
@@ -60,6 +63,7 @@ def refresh_analytics(db: Session) -> None:
                 return _decimal(
                     db.scalar(
                         select(func.coalesce(func.sum(SupplyChainEvent.cost), 0)).where(
+                            SupplyChainEvent.run_id == run_id,
                             func.date(SupplyChainEvent.event_time) == d,
                             SupplyChainEvent.warehouse_id == wh_id,
                             SupplyChainEvent.event_type == event_type,
@@ -78,6 +82,7 @@ def refresh_analytics(db: Session) -> None:
             inventory_units = int(
                 db.scalar(
                     select(func.coalesce(func.sum(InventorySnapshot.on_hand), 0)).where(
+                        InventorySnapshot.run_id == run_id,
                         InventorySnapshot.snapshot_date == day,
                         InventorySnapshot.warehouse_id == warehouse.id,
                     )
@@ -89,6 +94,7 @@ def refresh_analytics(db: Session) -> None:
                     select(func.coalesce(func.sum(InventorySnapshot.on_hand * SKU.unit_cost), 0))
                     .join(SKU, SKU.id == InventorySnapshot.sku_id)
                     .where(
+                        InventorySnapshot.run_id == run_id,
                         InventorySnapshot.snapshot_date == day,
                         InventorySnapshot.warehouse_id == warehouse.id,
                     )
@@ -98,6 +104,7 @@ def refresh_analytics(db: Session) -> None:
 
             db.add(
                 DailyWarehouseKPI(
+                    run_id=run_id,
                     kpi_date=day,
                     warehouse_id=warehouse.id,
                     demand_units=demand,
@@ -127,6 +134,7 @@ def refresh_analytics(db: Session) -> None:
         total_cost = network["holding"] + network["ordering"] + network["transfer"] + network["shortage"]
         db.add(
             DailyNetworkKPI(
+                run_id=run_id,
                 kpi_date=day,
                 demand_units=network["demand"],
                 fulfilled_units=network["fulfilled"],
