@@ -120,7 +120,7 @@ make lint    # ruff check .
 pytest -q
 ```
 
-38 tests covering simulation, disruption engine, all API endpoints, and edge cases.
+43 tests covering simulation, run-history isolation, recovery analytics, disruption engine, API endpoints, and edge cases.
 
 ## License
 
