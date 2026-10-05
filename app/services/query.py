@@ -12,6 +12,7 @@ from app.db.models import (
     DailyNetworkKPI,
     DailyWarehouseKPI,
     InventorySnapshot,
+    SimulationRun,
     Supplier,
     SupplyChainEvent,
     Warehouse,
@@ -24,9 +25,23 @@ from app.simulator.events import (
 )
 
 
+def latest_completed_run_id(db: Session) -> str | None:
+    return db.scalar(
+        select(SimulationRun.id)
+        .where(SimulationRun.status == "COMPLETED")
+        .order_by(SimulationRun.completed_at.desc(), SimulationRun.created_at.desc())
+        .limit(1)
+    )
+
+
+def _selected_run(db: Session, run_id: str | None) -> str | None:
+    return run_id or latest_completed_run_id(db)
+
+
 def get_inventory(
     db: Session,
     *,
+    run_id: str | None = None,
     snapshot_date: date | None = None,
     warehouse_id: int | None = None,
     sku_id: int | None = None,
@@ -35,12 +50,15 @@ def get_inventory(
     limit: int = 500,
     offset: int = 0,
 ) -> list[InventorySnapshot]:
+    selected_run = _selected_run(db, run_id)
     stmt = (
         select(InventorySnapshot)
-        .order_by(InventorySnapshot.snapshot_date.desc())
+        .order_by(InventorySnapshot.snapshot_date.desc(), InventorySnapshot.id.desc())
         .limit(limit)
         .offset(offset)
     )
+    if selected_run:
+        stmt = stmt.where(InventorySnapshot.run_id == selected_run)
     if snapshot_date:
         stmt = stmt.where(InventorySnapshot.snapshot_date == snapshot_date)
     if warehouse_id:
@@ -57,6 +75,7 @@ def get_inventory(
 def get_events(
     db: Session,
     *,
+    run_id: str | None = None,
     event_type: str | None = None,
     warehouse_id: int | None = None,
     sku_id: int | None = None,
@@ -66,12 +85,15 @@ def get_events(
     limit: int = 200,
     offset: int = 0,
 ) -> list[SupplyChainEvent]:
+    selected_run = _selected_run(db, run_id)
     stmt = (
         select(SupplyChainEvent)
         .order_by(SupplyChainEvent.event_time.desc(), SupplyChainEvent.id.desc())
         .limit(limit)
         .offset(offset)
     )
+    if selected_run:
+        stmt = stmt.where(SupplyChainEvent.run_id == selected_run)
     if event_type:
         stmt = stmt.where(SupplyChainEvent.event_type == event_type)
     if warehouse_id:
@@ -90,10 +112,14 @@ def get_events(
 def get_network_kpis(
     db: Session,
     *,
+    run_id: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[DailyNetworkKPI]:
+    selected_run = _selected_run(db, run_id)
     stmt = select(DailyNetworkKPI).order_by(DailyNetworkKPI.kpi_date)
+    if selected_run:
+        stmt = stmt.where(DailyNetworkKPI.run_id == selected_run)
     if date_from:
         stmt = stmt.where(DailyNetworkKPI.kpi_date >= date_from)
     if date_to:
@@ -104,13 +130,17 @@ def get_network_kpis(
 def get_warehouse_kpis(
     db: Session,
     *,
+    run_id: str | None = None,
     warehouse_id: int | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[DailyWarehouseKPI]:
+    selected_run = _selected_run(db, run_id)
     stmt = select(DailyWarehouseKPI).order_by(
         DailyWarehouseKPI.kpi_date, DailyWarehouseKPI.warehouse_id
     )
+    if selected_run:
+        stmt = stmt.where(DailyWarehouseKPI.run_id == selected_run)
     if warehouse_id:
         stmt = stmt.where(DailyWarehouseKPI.warehouse_id == warehouse_id)
     if date_from:
@@ -120,42 +150,42 @@ def get_warehouse_kpis(
     return list(db.scalars(stmt).all())
 
 
-def get_sku_kpis(db: Session) -> list[dict]:
-    # Single aggregated query: demand and stockout rolled up per SKU
-    agg = (
-        select(
-            SupplyChainEvent.sku_id,
-            func.coalesce(
-                func.sum(
-                    case(
-                        (SupplyChainEvent.event_type == DEMAND_CREATED, SupplyChainEvent.quantity),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("total_demand"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (SupplyChainEvent.event_type == STOCKOUT, SupplyChainEvent.quantity),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("total_stockout"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (SupplyChainEvent.event_type == STOCKOUT, SupplyChainEvent.cost),
-                        else_=0,
-                    )
-                ),
-                0,
-            ).label("total_shortage_cost"),
-        )
-        .where(SupplyChainEvent.event_type.in_([DEMAND_CREATED, STOCKOUT]))
-        .group_by(SupplyChainEvent.sku_id)
-    )
+def get_sku_kpis(db: Session, *, run_id: str | None = None) -> list[dict]:
+    selected_run = _selected_run(db, run_id)
+    agg = select(
+        SupplyChainEvent.sku_id,
+        func.coalesce(
+            func.sum(
+                case(
+                    (SupplyChainEvent.event_type == DEMAND_CREATED, SupplyChainEvent.quantity),
+                    else_=0,
+                )
+            ),
+            0,
+        ).label("total_demand"),
+        func.coalesce(
+            func.sum(
+                case(
+                    (SupplyChainEvent.event_type == STOCKOUT, SupplyChainEvent.quantity),
+                    else_=0,
+                )
+            ),
+            0,
+        ).label("total_stockout"),
+        func.coalesce(
+            func.sum(
+                case(
+                    (SupplyChainEvent.event_type == STOCKOUT, SupplyChainEvent.cost),
+                    else_=0,
+                )
+            ),
+            0,
+        ).label("total_shortage_cost"),
+    ).where(SupplyChainEvent.event_type.in_([DEMAND_CREATED, STOCKOUT]))
+    if selected_run:
+        agg = agg.where(SupplyChainEvent.run_id == selected_run)
+    agg = agg.group_by(SupplyChainEvent.sku_id)
+
     agg_by_sku: dict[int, tuple] = {
         row.sku_id: row for row in db.execute(agg).all()
     }
@@ -168,7 +198,6 @@ def get_sku_kpis(db: Session) -> list[dict]:
         total_stockout = int(row.total_stockout) if row else 0
         total_shortage_cost = Decimal(str(row.total_shortage_cost)) if row else Decimal(0)
         fulfilled = total_demand - total_stockout
-        fill_rate = fulfilled / total_demand if total_demand else 1.0
         results.append(
             {
                 "sku_id": sku.id,
@@ -177,40 +206,38 @@ def get_sku_kpis(db: Session) -> list[dict]:
                 "total_stockout_units": total_stockout,
                 "total_shortage_cost": total_shortage_cost,
                 "total_demand_units": total_demand,
-                "fill_rate": fill_rate,
+                "fill_rate": fulfilled / total_demand if total_demand else 1.0,
             }
         )
     return results
 
 
-def get_supplier_kpis(db: Session) -> list[dict]:
-    # Aggregate PO counts per supplier in one query
-    po_counts = {
-        row.supplier_id: int(row.total_pos)
-        for row in db.execute(
-            select(
-                SupplyChainEvent.supplier_id,
-                func.count(SupplyChainEvent.id).label("total_pos"),
-            )
-            .where(SupplyChainEvent.event_type == PURCHASE_ORDER_CREATED)
-            .group_by(SupplyChainEvent.supplier_id)
-        ).all()
-    }
+def get_supplier_kpis(db: Session, *, run_id: str | None = None) -> list[dict]:
+    selected_run = _selected_run(db, run_id)
+    po_stmt = select(
+        SupplyChainEvent.supplier_id,
+        func.count(SupplyChainEvent.id).label("total_pos"),
+    ).where(SupplyChainEvent.event_type == PURCHASE_ORDER_CREATED)
+    if selected_run:
+        po_stmt = po_stmt.where(SupplyChainEvent.run_id == selected_run)
+    po_stmt = po_stmt.group_by(SupplyChainEvent.supplier_id)
+    po_counts = {row.supplier_id: int(row.total_pos) for row in db.execute(po_stmt).all()}
 
-    # Fetch all delay events in one query
-    delay_events = list(
-        db.scalars(
-            select(SupplyChainEvent).where(SupplyChainEvent.event_type == SUPPLIER_DELAY)
-        ).all()
+    delay_stmt = select(SupplyChainEvent).where(
+        SupplyChainEvent.event_type == SUPPLIER_DELAY
     )
+    if selected_run:
+        delay_stmt = delay_stmt.where(SupplyChainEvent.run_id == selected_run)
+    delay_events = list(db.scalars(delay_stmt).all())
+
     delay_counts: dict[int, int] = {}
     delay_days_sums: dict[int, float] = {}
-    for e in delay_events:
-        sid = e.supplier_id
+    for event in delay_events:
+        sid = event.supplier_id
         if sid is None:
             continue
         delay_counts[sid] = delay_counts.get(sid, 0) + 1
-        days_val = json.loads(e.details).get("delay_days", 0) if e.details else 0
+        days_val = json.loads(event.details).get("delay_days", 0) if event.details else 0
         delay_days_sums[sid] = delay_days_sums.get(sid, 0.0) + float(days_val)
 
     suppliers = list(db.scalars(select(Supplier).order_by(Supplier.id)).all())
@@ -219,8 +246,6 @@ def get_supplier_kpis(db: Session) -> list[dict]:
         total_pos = po_counts.get(supplier.id, 0)
         total_delays = delay_counts.get(supplier.id, 0)
         delay_days_sum = delay_days_sums.get(supplier.id, 0.0)
-        delay_rate = total_delays / total_pos if total_pos else 0.0
-        avg_delay_days = delay_days_sum / total_delays if total_delays else 0.0
         results.append(
             {
                 "supplier_id": supplier.id,
@@ -228,8 +253,8 @@ def get_supplier_kpis(db: Session) -> list[dict]:
                 "name": supplier.name,
                 "total_purchase_orders": total_pos,
                 "total_delays": total_delays,
-                "delay_rate": delay_rate,
-                "avg_delay_days": avg_delay_days,
+                "delay_rate": total_delays / total_pos if total_pos else 0.0,
+                "avg_delay_days": delay_days_sum / total_delays if total_delays else 0.0,
             }
         )
     return results
@@ -243,15 +268,26 @@ def get_dimensions(db: Session) -> dict:
     }
 
 
-def get_kpi_summary(db: Session) -> DailyNetworkKPI | None:
-    return db.scalar(
-        select(DailyNetworkKPI).order_by(DailyNetworkKPI.kpi_date.desc()).limit(1)
-    )
+def get_kpi_summary(db: Session, *, run_id: str | None = None) -> DailyNetworkKPI | None:
+    selected_run = _selected_run(db, run_id)
+    stmt = select(DailyNetworkKPI).order_by(DailyNetworkKPI.kpi_date.desc()).limit(1)
+    if selected_run:
+        stmt = stmt.where(DailyNetworkKPI.run_id == selected_run)
+    return db.scalar(stmt)
 
 
-def get_low_stock_alerts(db: Session, *, warehouse_id: int | None = None) -> list[dict]:
-    """Return inventory rows where on_hand <= reorder_point on the latest snapshot date."""
-    latest_date_subq = select(func.max(InventorySnapshot.snapshot_date)).scalar_subquery()
+def get_low_stock_alerts(
+    db: Session,
+    *,
+    run_id: str | None = None,
+    warehouse_id: int | None = None,
+) -> list[dict]:
+    selected_run = _selected_run(db, run_id)
+    latest_date_stmt = select(func.max(InventorySnapshot.snapshot_date))
+    if selected_run:
+        latest_date_stmt = latest_date_stmt.where(InventorySnapshot.run_id == selected_run)
+    latest_date_subq = latest_date_stmt.scalar_subquery()
+
     stmt = (
         select(InventorySnapshot, SKU)
         .join(SKU, SKU.id == InventorySnapshot.sku_id)
@@ -261,6 +297,8 @@ def get_low_stock_alerts(db: Session, *, warehouse_id: int | None = None) -> lis
         )
         .order_by(InventorySnapshot.warehouse_id, SKU.code)
     )
+    if selected_run:
+        stmt = stmt.where(InventorySnapshot.run_id == selected_run)
     if warehouse_id:
         stmt = stmt.where(InventorySnapshot.warehouse_id == warehouse_id)
     rows = db.execute(stmt).all()
