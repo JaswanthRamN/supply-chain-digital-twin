@@ -11,6 +11,7 @@ from app.api.schemas import (
     ScenarioRequest,
     ScenarioRunOut,
     SimulationResult,
+    SimulationRunOut,
     SKUKPIOut,
     SupplierKPIOut,
     SupplyChainEventOut,
@@ -20,26 +21,17 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.services import query as svc
 from app.services import scenario as scn_svc
-from app.simulator.disruptions import (
-    DemandSpike,
-    DisruptionConfig,
-    SupplierShutdown,
-    TransferDelay,
-)
+from app.simulator.disruptions import DemandSpike, DisruptionConfig, SupplierShutdown, TransferDelay
 from app.simulator.engine import DigitalTwinSimulator
 from app.simulator.events import EventType
 
 router = APIRouter()
 
 
-# ── Utility ──────────────────────────────────────────────────────────────────
-
 @router.get("/health", tags=["Utility"])
 def health():
     return {"status": "ok"}
 
-
-# ── Simulation ───────────────────────────────────────────────────────────────
 
 @router.post("/simulation/run", response_model=SimulationResult, tags=["Simulation"])
 def run_simulation(
@@ -49,8 +41,12 @@ def run_simulation(
     reset: bool = Query(True),
     db: Session = Depends(get_db),
 ):
-    result = DigitalTwinSimulator(db, seed).run(days=days, start_date=start_date, reset=reset)
-    return result
+    return DigitalTwinSimulator(db, seed).run(
+        days=days,
+        start_date=start_date,
+        reset=reset,
+        run_type="baseline",
+    )
 
 
 @router.post("/simulation/scenario", response_model=ScenarioRunOut, tags=["Simulation"])
@@ -110,10 +106,22 @@ def get_scenario(run_id: int, db: Session = Depends(get_db)):
     return run
 
 
-# ── Inventory ────────────────────────────────────────────────────────────────
+@router.get("/simulation/runs", response_model=list[SimulationRunOut], tags=["Simulation"])
+def list_simulation_runs(db: Session = Depends(get_db)):
+    return scn_svc.list_simulation_runs(db)
+
+
+@router.get("/simulation/runs/{run_id}", response_model=SimulationRunOut, tags=["Simulation"])
+def get_simulation_run(run_id: str, db: Session = Depends(get_db)):
+    run = scn_svc.get_simulation_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Simulation run {run_id} not found.")
+    return run
+
 
 @router.get("/inventory", response_model=list[InventorySnapshotOut], tags=["Inventory"])
 def inventory(
+    run_id: str | None = None,
     snapshot_date: date | None = None,
     warehouse_id: int | None = None,
     sku_id: int | None = None,
@@ -125,6 +133,7 @@ def inventory(
 ):
     return svc.get_inventory(
         db,
+        run_id=run_id,
         snapshot_date=snapshot_date,
         warehouse_id=warehouse_id,
         sku_id=sku_id,
@@ -137,16 +146,16 @@ def inventory(
 
 @router.get("/inventory/low-stock", response_model=list[LowStockAlertOut], tags=["Inventory"])
 def low_stock(
+    run_id: str | None = None,
     warehouse_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    return svc.get_low_stock_alerts(db, warehouse_id=warehouse_id)
+    return svc.get_low_stock_alerts(db, run_id=run_id, warehouse_id=warehouse_id)
 
-
-# ── Events ────────────────────────────────────────────────────────────────────
 
 @router.get("/events", response_model=list[SupplyChainEventOut], tags=["Events"])
 def events(
+    run_id: str | None = None,
     event_type: str | None = None,
     warehouse_id: int | None = None,
     sku_id: int | None = None,
@@ -166,6 +175,7 @@ def events(
             )
     return svc.get_events(
         db,
+        run_id=run_id,
         event_type=event_type,
         warehouse_id=warehouse_id,
         sku_id=sku_id,
@@ -177,11 +187,9 @@ def events(
     )
 
 
-# ── KPIs ──────────────────────────────────────────────────────────────────────
-
 @router.get("/kpis/summary", response_model=NetworkKPIOut, tags=["KPIs"])
-def summary(db: Session = Depends(get_db)):
-    latest = svc.get_kpi_summary(db)
+def summary(run_id: str | None = None, db: Session = Depends(get_db)):
+    latest = svc.get_kpi_summary(db, run_id=run_id)
     if latest is None:
         raise HTTPException(status_code=404, detail="No simulation data. Run a simulation first.")
     return latest
@@ -189,34 +197,45 @@ def summary(db: Session = Depends(get_db)):
 
 @router.get("/kpis/network", response_model=list[NetworkKPIOut], tags=["KPIs"])
 def network(
+    run_id: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     db: Session = Depends(get_db),
 ):
-    return svc.get_network_kpis(db, date_from=date_from, date_to=date_to)
+    return svc.get_network_kpis(
+        db,
+        run_id=run_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @router.get("/kpis/warehouse", response_model=list[WarehouseKPIOut], tags=["KPIs"])
 def warehouse_kpis(
+    run_id: str | None = None,
     warehouse_id: int | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     db: Session = Depends(get_db),
 ):
-    return svc.get_warehouse_kpis(db, warehouse_id=warehouse_id, date_from=date_from, date_to=date_to)
+    return svc.get_warehouse_kpis(
+        db,
+        run_id=run_id,
+        warehouse_id=warehouse_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @router.get("/kpis/sku", response_model=list[SKUKPIOut], tags=["KPIs"])
-def sku_kpis(db: Session = Depends(get_db)):
-    return svc.get_sku_kpis(db)
+def sku_kpis(run_id: str | None = None, db: Session = Depends(get_db)):
+    return svc.get_sku_kpis(db, run_id=run_id)
 
 
 @router.get("/kpis/supplier", response_model=list[SupplierKPIOut], tags=["KPIs"])
-def supplier_kpis(db: Session = Depends(get_db)):
-    return svc.get_supplier_kpis(db)
+def supplier_kpis(run_id: str | None = None, db: Session = Depends(get_db)):
+    return svc.get_supplier_kpis(db, run_id=run_id)
 
-
-# ── Dimensions ────────────────────────────────────────────────────────────────
 
 @router.get("/dimensions", response_model=DimensionsOut, tags=["Dimensions"])
 def dimensions(db: Session = Depends(get_db)):
