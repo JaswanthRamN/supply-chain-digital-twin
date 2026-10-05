@@ -92,10 +92,13 @@ with st.sidebar:
         }
         try:
             result = post("/simulation/scenario", json=body)
+            recovery = result.get("recovery_days")
+            recovery_text = "not recovered in window" if recovery is None else f"{recovery} day(s)"
             st.success(
                 f"Scenario '{result['name']}' complete. "
                 f"Δ fill rate: {result.get('delta_fill_rate', 0):.3f}, "
-                f"Δ cost: {result.get('delta_total_cost', 0)}"
+                f"Δ cost: {result.get('delta_total_cost', 0)}, "
+                f"recovery: {recovery_text}"
             )
             st.cache_data.clear()
             st.rerun()
@@ -211,11 +214,40 @@ try:
     if scenarios.empty:
         st.info("No scenario runs yet. Use the sidebar to run a disruption scenario.")
     else:
-        scn_cols = ["id", "name", "created_at", "days", "delta_fill_rate", "delta_total_cost", "delta_stockout_units"]
+        scn_cols = [
+            "id",
+            "name",
+            "created_at",
+            "baseline_run_id",
+            "scenario_run_id",
+            "days",
+            "delta_fill_rate",
+            "delta_total_cost",
+            "delta_stockout_units",
+            "recovery_days",
+        ]
         st.dataframe(
             scenarios[scn_cols],
             use_container_width=True,
         )
+
+    st.subheader("Simulation Run History")
+    runs = pd.DataFrame(get("/simulation/runs"))
+    if runs.empty:
+        st.info("No simulation runs yet.")
+    else:
+        run_cols = [
+            "id",
+            "run_type",
+            "scenario_name",
+            "baseline_run_id",
+            "seed",
+            "simulation_start",
+            "simulation_end",
+            "status",
+            "completed_at",
+        ]
+        st.dataframe(runs[run_cols], use_container_width=True)
 
     # ── Recent events ────────────────────────────────────────────────────────
     event_types = [
