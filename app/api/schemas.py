@@ -45,6 +45,7 @@ class DimensionsOut(BaseModel):
 
 class InventorySnapshotOut(_ORM):
     id: int
+    run_id: str
     snapshot_date: date
     warehouse_id: int
     sku_id: int
@@ -64,6 +65,7 @@ class LowStockAlertOut(BaseModel):
 
 class SupplyChainEventOut(_ORM):
     id: int
+    run_id: str
     event_time: datetime
     event_type: str
     warehouse_id: int | None
@@ -76,6 +78,8 @@ class SupplyChainEventOut(_ORM):
 
 
 class NetworkKPIOut(_ORM):
+    id: int
+    run_id: str
     kpi_date: date
     demand_units: int
     fulfilled_units: int
@@ -92,6 +96,7 @@ class NetworkKPIOut(_ORM):
 
 class WarehouseKPIOut(_ORM):
     id: int
+    run_id: str
     kpi_date: date
     warehouse_id: int
     demand_units: int
@@ -128,13 +133,30 @@ class SupplierKPIOut(BaseModel):
 
 
 class SimulationResult(BaseModel):
+    run_id: str
+    run_type: str
+    baseline_run_id: str | None
+    scenario_name: str | None
     days: int
     seed: int
     start_date: date
     end_date: date
+    status: str
 
 
-# ── Scenario / Disruption schemas ──────────────────────────────────────────
+class SimulationRunOut(_ORM):
+    id: str
+    run_type: str
+    baseline_run_id: str | None
+    scenario_name: str | None
+    seed: int
+    simulation_start: date
+    simulation_end: date
+    status: str
+    error_message: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
 
 class SupplierShutdownIn(BaseModel):
     supplier_id: int
@@ -175,8 +197,11 @@ class ScenarioRunOut(_ORM):
     seed: int
     start_date: date
     end_date: date
+    baseline_run_id: str | None
+    scenario_run_id: str
     disruption_config: str | None
     delta_fill_rate: float | None
     delta_total_cost: Decimal | None
     delta_stockout_units: int | None
+    recovery_days: int | None
     kpi_snapshot: str | None
