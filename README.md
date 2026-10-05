@@ -3,14 +3,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/JaswanthRamN/supply-chain-digital-twin/actions/workflows/ci.yml/badge.svg)](https://github.com/JaswanthRamN/supply-chain-digital-twin/actions/workflows/ci.yml)
 
-A deterministic supply-chain simulation and operations analytics platform for three warehouses, 30 SKUs, and five suppliers. Includes a Milestone 8 disruption and scenario engine for what-if analysis.
+A deterministic supply-chain simulation and operations analytics platform for three warehouses, 30 SKUs, and five suppliers. Milestone 8B adds preserved simulation-run history, controlled baseline-versus-scenario pairs, run-scoped analytics, and recovery-time analysis.
 
 ## Architecture
 
 1. **Simulation engine** generates demand, fulfillment, stockouts, transfers, purchase orders, receipts, and costs. Accepts a `DisruptionConfig` for supplier shutdowns, demand spikes, and transfer delays.
 2. **Operational store** uses SQLAlchemy and supports PostgreSQL in Docker plus SQLite for local development/tests.
-3. **Analytics layer** materialises daily warehouse and network KPI tables.
-4. **FastAPI service** exposes inventory, events, dimensions, simulation controls, KPI endpoints, low-stock alerts, and scenario comparison.
+3. **Analytics layer** materialises daily warehouse and network KPI tables scoped by immutable simulation run IDs.
+4. **FastAPI service** exposes inventory, events, dimensions, simulation controls, run history, KPI endpoints, low-stock alerts, and scenario comparison.
 5. **Operations Control Tower** is a Streamlit dashboard with fill rate trends, per-warehouse charts, SKU stockout heatmaps, supplier performance, low-stock alerts, and a built-in scenario runner.
 
 ## Quick start with Docker Compose
@@ -56,7 +56,9 @@ streamlit run dashboard/control_tower.py
 | `POST` | `/simulation/scenario` | Run a disruption scenario and compare to baseline |
 | `GET`  | `/simulation/scenarios` | List all scenario runs |
 | `GET`  | `/simulation/scenarios/{id}` | Get a single scenario run |
-| `GET`  | `/inventory` | Inventory snapshots (filterable, paginated) |
+| `GET`  | `/simulation/runs` | List preserved simulation runs |
+| `GET`  | `/simulation/runs/{run_id}` | Get one baseline or scenario run |
+| `GET`  | `/inventory` | Inventory snapshots (filterable, paginated, optional `run_id`) |
 | `GET`  | `/inventory/low-stock` | Items at or below reorder point |
 | `GET`  | `/events` | Supply-chain events (filterable, paginated) |
 | `GET`  | `/kpis/summary` | Latest network KPI snapshot |
@@ -92,13 +94,18 @@ Supported disruption types:
 - **`demand_spikes`** — multiply demand for specific SKUs/warehouses by a factor
 - **`transfer_delays`** — add extra lead-time days to inter-warehouse transfers
 
-Response includes `delta_fill_rate`, `delta_total_cost`, and `delta_stockout_units` vs the baseline.
+Response includes the preserved `baseline_run_id` and `scenario_run_id`, plus `delta_fill_rate`, `delta_total_cost`, `delta_stockout_units`, and `recovery_days`. Baseline and scenario runs use the same seed and simulation window so the comparison is controlled.
 
 ## Analytics tables
 
-- `daily_warehouse_kpis`: daily demand, fulfilled units, stockouts, fill rate, inventory, inventory value, and cost components by warehouse.
-- `daily_network_kpis`: consolidated daily network metrics.
-- `scenario_runs`: named scenario results with KPI deltas and a daily snapshot.
+- `simulation_runs`: immutable baseline/scenario run metadata, seed, window, status, and baseline linkage.
+- `daily_warehouse_kpis`: run-scoped daily demand, fulfilled units, stockouts, fill rate, inventory, inventory value, and cost components by warehouse.
+- `daily_network_kpis`: run-scoped consolidated daily network metrics.
+- `scenario_runs`: named scenario comparisons with baseline/scenario IDs, KPI deltas, daily snapshots, and recovery time.
+
+### Database upgrade note
+
+Milestone 8B changes operational-table keys by adding `run_id`. Existing databases created before this architecture are intentionally rejected with a clear startup error. The project currently uses synthetic data and does not yet ship Alembic migrations, so recreate the local SQLite database or Docker PostgreSQL volume when moving to this branch.
 
 ## Development
 
