@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 
 from app.analytics.refresh import refresh_analytics
 from app.db.models import (
+    SKU,
     DailyNetworkKPI,
     DailyWarehouseKPI,
-    SKU,
     InventorySnapshot,
     SimulationRun,
     Supplier,
