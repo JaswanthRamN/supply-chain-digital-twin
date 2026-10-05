@@ -43,12 +43,14 @@ def test_simulation_endpoint_accepts_seed_and_start_date(db):
     try:
         response = client.post("/simulation/run?days=2&seed=99&start_date=2026-02-01")
         assert response.status_code == 200
-        assert response.json() == {
-            "days": 2,
-            "seed": 99,
-            "start_date": "2026-02-01",
-            "end_date": "2026-02-02",
-        }
+        data = response.json()
+        assert data["days"] == 2
+        assert data["seed"] == 99
+        assert data["start_date"] == "2026-02-01"
+        assert data["end_date"] == "2026-02-02"
+        assert data["run_type"] == "baseline"
+        assert data["status"] == "COMPLETED"
+        assert data["run_id"]
     finally:
         app.dependency_overrides.clear()
 
@@ -236,15 +238,23 @@ def test_simulation_days_1_edge_case(db):
         app.dependency_overrides.clear()
 
 
-def test_simulation_reset_false_appends_data(db):
+def test_simulation_runs_preserve_history_without_combining_kpis(db):
     client = _client(db)
     try:
-        client.post("/simulation/run?days=3&seed=42&start_date=2026-01-01")
-        response = client.post("/simulation/run?days=3&seed=42&start_date=2026-01-04&reset=false")
-        assert response.status_code == 200
-        # network KPIs should now cover 6 days
-        kpi_response = client.get("/kpis/network")
-        assert len(kpi_response.json()) == 6
+        first = client.post("/simulation/run?days=3&seed=42&start_date=2026-01-01").json()
+        second_response = client.post("/simulation/run?days=3&seed=42&start_date=2026-01-04&reset=false")
+        assert second_response.status_code == 200
+        second = second_response.json()
+        assert first["run_id"] != second["run_id"]
+
+        latest_kpis = client.get("/kpis/network")
+        assert len(latest_kpis.json()) == 3
+        first_kpis = client.get(f"/kpis/network?run_id={first['run_id']}")
+        assert len(first_kpis.json()) == 3
+
+        runs = client.get("/simulation/runs")
+        assert runs.status_code == 200
+        assert len(runs.json()) == 2
     finally:
         app.dependency_overrides.clear()
 
@@ -316,6 +326,10 @@ def test_scenario_run_endpoint(db):
         assert data["days"] == 5
         assert data["delta_fill_rate"] is not None
         assert data["delta_total_cost"] is not None
+        assert data["baseline_run_id"] is not None
+        assert data["scenario_run_id"] is not None
+        assert data["baseline_run_id"] != data["scenario_run_id"]
+        assert "recovery_days" in data
     finally:
         app.dependency_overrides.clear()
 
