@@ -10,10 +10,13 @@ from app.simulator.events import DEMAND_CREATED, STOCKOUT, SUPPLIER_DELAY
 
 def test_demand_spike_increases_demand(db):
     baseline_sim = DigitalTwinSimulator(db, seed=42)
-    baseline_sim.run(days=10, reset=True)
+    baseline = baseline_sim.run(days=10, reset=True)
     baseline_demand = int(
         db.scalar(
-            select(func.sum(SupplyChainEvent.quantity)).where(SupplyChainEvent.event_type == DEMAND_CREATED)
+            select(func.sum(SupplyChainEvent.quantity)).where(
+                SupplyChainEvent.run_id == baseline["run_id"],
+                SupplyChainEvent.event_type == DEMAND_CREATED,
+            )
         )
         or 0
     )
@@ -28,10 +31,13 @@ def test_demand_spike_increases_demand(db):
         ]
     )
     disrupted_sim = DigitalTwinSimulator(db, seed=42, disruptions=disruptions)
-    disrupted_sim.run(days=10, reset=True)
+    disrupted = disrupted_sim.run(days=10, reset=True)
     disrupted_demand = int(
         db.scalar(
-            select(func.sum(SupplyChainEvent.quantity)).where(SupplyChainEvent.event_type == DEMAND_CREATED)
+            select(func.sum(SupplyChainEvent.quantity)).where(
+                SupplyChainEvent.run_id == disrupted["run_id"],
+                SupplyChainEvent.event_type == DEMAND_CREATED,
+            )
         )
         or 0
     )
@@ -49,18 +55,24 @@ def test_demand_spike_increases_stockouts(db):
             )
         ]
     )
-    DigitalTwinSimulator(db, seed=42).run(days=10, reset=True)
+    baseline = DigitalTwinSimulator(db, seed=42).run(days=10, reset=True)
     baseline_stockout = int(
         db.scalar(
-            select(func.sum(SupplyChainEvent.quantity)).where(SupplyChainEvent.event_type == STOCKOUT)
+            select(func.sum(SupplyChainEvent.quantity)).where(
+                SupplyChainEvent.run_id == baseline["run_id"],
+                SupplyChainEvent.event_type == STOCKOUT,
+            )
         )
         or 0
     )
 
-    DigitalTwinSimulator(db, seed=42, disruptions=disruptions).run(days=10, reset=True)
+    disrupted = DigitalTwinSimulator(db, seed=42, disruptions=disruptions).run(days=10, reset=True)
     disrupted_stockout = int(
         db.scalar(
-            select(func.sum(SupplyChainEvent.quantity)).where(SupplyChainEvent.event_type == STOCKOUT)
+            select(func.sum(SupplyChainEvent.quantity)).where(
+                SupplyChainEvent.run_id == disrupted["run_id"],
+                SupplyChainEvent.event_type == STOCKOUT,
+            )
         )
         or 0
     )
@@ -77,10 +89,11 @@ def test_supplier_shutdown_generates_delay_events(db):
             )
         ]
     )
-    DigitalTwinSimulator(db, seed=42, disruptions=disruptions).run(days=10)
+    result = DigitalTwinSimulator(db, seed=42, disruptions=disruptions).run(days=10)
     shutdown_events = list(
         db.scalars(
             select(SupplyChainEvent).where(
+                SupplyChainEvent.run_id == result["run_id"],
                 SupplyChainEvent.event_type == SUPPLIER_DELAY,
                 SupplyChainEvent.supplier_id == 1,
             )
@@ -136,10 +149,13 @@ def test_disruption_config_transfer_extra_days():
 def test_combined_disruption_spike_and_shutdown(db):
     """Combined demand spike + supplier shutdown should produce more stockouts than baseline."""
     from datetime import date as dt
-    DigitalTwinSimulator(db, seed=42).run(days=10, reset=True)
+    baseline = DigitalTwinSimulator(db, seed=42).run(days=10, reset=True)
     baseline_stockout = int(
         db.scalar(
-            select(func.sum(SupplyChainEvent.quantity)).where(SupplyChainEvent.event_type == STOCKOUT)
+            select(func.sum(SupplyChainEvent.quantity)).where(
+                SupplyChainEvent.run_id == baseline["run_id"],
+                SupplyChainEvent.event_type == STOCKOUT,
+            )
         )
         or 0
     )
@@ -148,10 +164,13 @@ def test_combined_disruption_spike_and_shutdown(db):
         demand_spikes=[DemandSpike(multiplier=3.0, start_date=dt(2026, 1, 1), end_date=dt(2026, 1, 10))],
         supplier_shutdowns=[SupplierShutdown(supplier_id=1, start_date=dt(2026, 1, 1), end_date=dt(2026, 1, 10))],
     )
-    DigitalTwinSimulator(db, seed=42, disruptions=disruptions).run(days=10, reset=True)
+    combined = DigitalTwinSimulator(db, seed=42, disruptions=disruptions).run(days=10, reset=True)
     combined_stockout = int(
         db.scalar(
-            select(func.sum(SupplyChainEvent.quantity)).where(SupplyChainEvent.event_type == STOCKOUT)
+            select(func.sum(SupplyChainEvent.quantity)).where(
+                SupplyChainEvent.run_id == combined["run_id"],
+                SupplyChainEvent.event_type == STOCKOUT,
+            )
         )
         or 0
     )
